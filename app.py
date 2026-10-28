@@ -13,39 +13,22 @@ from database import (
     add_conversation_turn, get_user_profile, update_user_profile, get_connection
 )
 
-# 1. 加载本地环境变量
 load_dotenv()
+init_db()
 
-# 2. 安全地读取 API Key（优先云端，其次本地）
-api_key = None
-try:
-    if "DEEPSEEK_API_KEY" in st.secrets:
-        api_key = st.secrets["DEEPSEEK_API_KEY"]
-except Exception:
-    pass
-
-if not api_key:
-    api_key = os.environ.get("DEEPSEEK_API_KEY")
-
-if not api_key:
-    st.error("❌ 未找到 DEEPSEEK_API_KEY。请检查本地 .env 文件或在 Streamlit Cloud 的 Secrets 中配置是否正确。")
-    st.stop()
-
-# 3. 初始化客户端
 client = OpenAI(
-    api_key=api_key,
+    api_key=os.environ.get("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com",
 )
-
-# 4. 初始化数据库
-init_db()
 
 st.set_page_config(page_title="情感陪伴智能体", page_icon="🤖", layout="wide")
 
 # ================= 侧边栏：实验控制面板 =================
 with st.sidebar:
+    
     st.header("🔬 实验控制面板")
     
+    # 这里就是 A/B 对照开关
     group = st.radio(
         "当前实验组别：",
         ["B组：有长期记忆 (Experimental)", "A组：无记忆基线 (Control)"],
@@ -60,6 +43,7 @@ with st.sidebar:
     *   **具体帮助性**：是否给出了有效的建议？
     """)
     
+    # 导出数据按钮
     if st.button("📥 导出当前对话数据 (CSV)"):
         if "messages" in st.session_state and st.session_state.messages:
             df = pd.DataFrame(st.session_state.messages)
@@ -73,52 +57,44 @@ with st.sidebar:
         else:
             st.warning("当前还没有对话记录哦！")
 
-    st.divider()
-    # 查看数据库按钮
-    if st.button("👀 查看 / 隐藏后台数据库"):
-        st.session_state.show_db = not st.session_state.get("show_db", False)
+# ================= 主界面 =================
+st.title(f"🤖 情感陪伴智能体 ({group.split('：')[0]})")
 
+if group.startswith("A组"):
+    USER_ID = "test_user_A"
+else:
+    USER_ID = "test_user_B"
 
-# ================= 函数定义区 =================
-# 在 app.py 中找到这个函数
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 def extract_memory(text):
     prompt = f"""
-    你是一个记忆提取器。请仔细分析用户的输入。
-    1. 判断是否包含情感事件。
-    2. 判断是否包含用户的【喜好、厌恶、习惯或称呼】。
-    
-    你必须输出严格的 JSON 格式：
+    分析用户输入，提取情感事件和用户偏好。
+    输出严格 JSON：
     {{
         "has_event": true/false,
-        "event_summary": "简短总结发生的事，如果没有则为空",
-        "emotion_label": "情绪标签（如开心、焦虑），如果没有则为空",
+        "event_summary": "...",
+        "emotion_label": "...",
         "intensity": 0.5,
-        "user_preference": "提取用户的喜好或厌恶（如：喜欢火锅、讨厌香菜）。如果有多个请用逗号分隔。如果用户明确说“请记住”、“我的爱好是”，必须提取。没有则为空字符串"
+        "user_preference": "提取用户的喜好或厌恶（如：喜欢火锅、讨厌香菜），如果有多个请用逗号分隔，没有则为空字符串"
     }}
-    
     用户输入：{text}
     """
-    
+    res = client.chat.completions.create(
+        model="deepseek-flash",
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"}
+    )
     try:
-        res = client.chat.completions.create(
-            model="deepseek-flash",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.1
-        )
-        content = res.choices[0].message.content
-        
-        # 强制在页面上显示模型到底返回了什么！
-        st.info(f"模型原始返回: {content}") 
-        
-        return json.loads(content)
-        
-    except Exception as e:
-        # 如果报错，直接把红字错误展示在网页上！
-        st.error(f"提取记忆出错: {e}")
+        return json.loads(res.choices[0].message.content)
+    except:
         return {"has_event": False, "user_preference": ""}
 
-def generate_response(text, use_memory, user_id):
+def generate_response(text, use_memory):
     system_prompt = """
     你是一个温暖、自然、像真人朋友一样的陪伴助手。请遵循以下规则：
     1. 语气要口语化、自然，不要像客服机器人那样生硬。不要一上来就“抱歉”、“我理解你的感受”。
@@ -126,12 +102,15 @@ def generate_response(text, use_memory, user_id):
     3. 如果用户情绪低落，先共情，再给一点温和的建议或转移注意力；如果用户开心，就跟着一起开心。
     """
     
+    # 【核心控制点】：根据实验组别决定是否读取记忆
     if use_memory:
-        memory_context = retrieve_relevant_events(user_id, text)
-        profile_str = get_user_profile(user_id)
+        memory_context = retrieve_relevant_events(USER_ID, text)
+        profile_str = get_user_profile(USER_ID) # 拿到的是 JSON 字符串
         
         if profile_str:
+            
             try:
+                # 解析成列表，然后用“、”拼接成自然语言
                 pref_list = json.loads(profile_str)
                 readable_pref = "、".join(pref_list)
                 system_prompt += f"\n【用户画像】用户喜欢/讨厌: {readable_pref}"
@@ -151,91 +130,37 @@ def generate_response(text, use_memory, user_id):
     )
     return res.choices[0].message.content
 
+# 渲染历史对话
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# ================= 主界面 =================
-st.title(f"🤖 情感陪伴智能体 ({group.split('：')[0]})")
-
-if group.startswith("A组"):
-    USER_ID = "test_user_A"
-else:
-    USER_ID = "test_user_B"
-
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())[:8]
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-
-
-# 👇 状态控制区：如果开关是打开的，展示数据库 👇
-if st.session_state.get("show_db", False):
-    st.subheader("🗄️ 当前云端数据库实时数据")
-    st.info(f"当前查询用户 ID: {USER_ID}")
+# 接收输入
+if prompt := st.chat_input("想聊点什么？"):
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
     
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("** 情感事件表 (emotional_events)**")
-        cursor.execute("SELECT event_summary, emotion_label FROM emotional_events WHERE user_id = ?", (USER_ID,))
-        events = cursor.fetchall()
-        if events:
-            for e in events:
-                st.write(f"- {e[0]} (情绪: {e[1]})")
-        else:
-            st.info("暂无情感事件")
-            
-    with col2:
-        st.markdown("**👤 用户画像表 (user_profile)**")
-        cursor.execute("SELECT preferences FROM user_profile WHERE user_id = ?", (USER_ID,))
-        profile = cursor.fetchall()
-        if profile:
-            st.write(profile)  # 直接打印原始数据，绝对能显示
-        else:
-            st.info("暂无用户画像")
-    conn.close()
-    
-    if st.button("⬅️ 退出查看，返回对话"):
-        st.session_state.show_db = False
-        st.rerun()
-    st.divider() 
+    # 存入对话流水（两组的聊天记录都要存，方便日后分析）
+    add_conversation_turn(USER_ID, st.session_state.session_id, "user", prompt)
 
-
-# 👇 聊天区：只有在“不查看数据库”的时候，才显示聊天界面 👇
-if not st.session_state.get("show_db", False):
-    
-    # 渲染历史对话
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    # 接收输入
-    if prompt := st.chat_input("想聊点什么？"):
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.spinner("思考中..."):
+        use_memory = (group == "B组：有长期记忆 (Experimental)")
         
-        add_conversation_turn(USER_ID, st.session_state.session_id, "user", prompt)
+        # 【核心控制点】：只有在 B 组，才自动提取并写入记忆数据库
+        if use_memory:
+            memory_data = extract_memory(prompt)
+            if memory_data.get("has_event"):
+                add_emotional_event(USER_ID, memory_data["event_summary"], memory_data["emotion_label"], memory_data["intensity"])
+            if memory_data.get("user_preference"):
+                update_user_profile(USER_ID, memory_data["user_preference"])
 
-        with st.spinner("思考中..."):
-            use_memory = (group == "B组：有长期记忆 (Experimental)")
-            
-            if use_memory:
-                memory_data = extract_memory(prompt)
-                st.toast(f"后台提取: {memory_data}")
-                if memory_data.get("has_event"):
-                    add_emotional_event(USER_ID, memory_data["event_summary"], memory_data["emotion_label"], memory_data["intensity"])
-                if memory_data.get("user_preference"):
-                    update_user_profile(USER_ID, memory_data["user_preference"])
-                    st.success(f"✅ 成功写入画像: {memory_data['user_preference']}")
+        # 生成回复
+        response_text = generate_response(prompt, use_memory)
+        
+        # 存入对话流水
+        add_conversation_turn(USER_ID, st.session_state.session_id, "assistant", response_text)
 
-            # 注意：这里我加了一个参数 USER_ID，防止函数内部找不到变量
-            response_text = generate_response(prompt, use_memory, USER_ID)
-            
-            add_conversation_turn(USER_ID, st.session_state.session_id, "assistant", response_text)
-
-        with st.chat_message("assistant"):
-            st.markdown(response_text)
-        st.session_state.messages.append({"role": "assistant", "content": response_text})
+    with st.chat_message("assistant"):
+        st.markdown(response_text)
+    st.session_state.messages.append({"role": "assistant", "content": response_text})
