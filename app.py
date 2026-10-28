@@ -80,23 +80,29 @@ with st.sidebar:
 
 
 # ================= 函数定义区 =================
+# 在 app.py 中找到这个函数
 def extract_memory(text):
     prompt = f"""
-    分析用户输入，提取情感事件和用户偏好。
-    输出严格 JSON：
+    你是一个记忆提取器。请仔细分析用户的输入。
+    1. 判断是否包含情感事件。
+    2. 判断是否包含用户的【喜好、厌恶、习惯或称呼】。
+    
+    你必须输出严格的 JSON 格式：
     {{
         "has_event": true/false,
-        "event_summary": "...",
-        "emotion_label": "...",
+        "event_summary": "简短总结发生的事，如果没有则为空",
+        "emotion_label": "情绪标签（如开心、焦虑），如果没有则为空",
         "intensity": 0.5,
-        "user_preference": "提取用户的喜好或厌恶（如：喜欢火锅、讨厌香菜），如果有多个请用逗号分隔，没有则为空字符串"
+        "user_preference": "提取用户的喜好或厌恶（如：喜欢火锅、讨厌香菜）。如果有多个请用逗号分隔。如果用户明确说“请记住”、“我的爱好是”，必须提取。没有则为空字符串"
     }}
+    
     用户输入：{text}
     """
     res = client.chat.completions.create(
         model="deepseek-flash",
         messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"}
+        response_format={"type": "json_object"},
+        temperature=0.1  # 👇 加上这个，让提取更严谨
     )
     try:
         return json.loads(res.choices[0].message.content)
@@ -162,7 +168,7 @@ if st.session_state.get("show_db", False):
     
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("**🧠 情感事件表 (emotional_events)**")
+        st.markdown("** 情感事件表 (emotional_events)**")
         cursor.execute("SELECT event_summary, emotion_label, event_time FROM emotional_events WHERE user_id = ?", (USER_ID,))
         events = cursor.fetchall()
         if events:
@@ -207,6 +213,7 @@ if not st.session_state.get("show_db", False):
             
             if use_memory:
                 memory_data = extract_memory(prompt)
+                st.toast(f"后台提取: {memory_data}")
                 if memory_data.get("has_event"):
                     add_emotional_event(USER_ID, memory_data["event_summary"], memory_data["emotion_label"], memory_data["intensity"])
                 if memory_data.get("user_preference"):
