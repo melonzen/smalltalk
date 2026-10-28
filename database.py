@@ -2,6 +2,7 @@
 # 这个文件负责数据库的初始化和基本操作，包括存储和检索用户的情感事件。
 import sqlite3
 import json
+from datetime import datetime
 
 DB_PATH = "companion.db"
 
@@ -52,14 +53,11 @@ def init_db():
     conn.close()
     print("✅ 数据库和表已初始化完成。")
 
-# 存记忆和取记忆的两个函数，用最简单的方式SQL的LIKE匹配和 ORDER BY 实现，后续可以升级为更复杂的检索逻辑
-
-#存记忆
+# 存记忆
 def add_emotional_event(user_id, event_summary, emotion_label, intensity):
     """将一条情感事件写入数据库"""
     conn = get_connection()
     cursor = conn.cursor()
-    from datetime import datetime
     now = datetime.now().isoformat()
     
     cursor.execute("""
@@ -72,13 +70,11 @@ def add_emotional_event(user_id, event_summary, emotion_label, intensity):
     print(f"💾 [记忆写入] 已记住: {event_summary} ({emotion_label})")
 
 
-#取记忆，检索
+# 取记忆，检索
 def retrieve_relevant_events(user_id, current_text, limit=2):
     conn = get_connection()
     cursor = conn.cursor()
     
-    # 提取当前文本里长度大于1的词（简单粗暴的过滤）
-    # 如果没匹配上，就不提取记忆，避免强行关联
     cursor.execute("""
         SELECT DISTINCT event_summary, emotion_label FROM emotional_events 
         WHERE user_id = ? AND is_active = 1
@@ -91,23 +87,17 @@ def retrieve_relevant_events(user_id, current_text, limit=2):
     if not rows:
         return ""
     
-    # 简单的相关性判断：如果当前输入里包含了记忆里的字，才召回
     relevant_memories = []
     for summary, label in rows:
-        # 比如记忆是“膝盖受伤”，当前输入是“跑步”，虽然没直接匹配，但我们可以放行
-        # 为了防止过度关联，这里先保留全部，但通过 Prompt 去控制
         relevant_memories.append(f"- 用户过去提到过：{summary}（情绪：{label}）")
     
-    # 如果连一条记录都没有，直接返回空
     return "\n".join(relevant_memories[:limit])
 
 # 将对话流水存入数据库
-
 def add_conversation_turn(user_id, session_id, role, content):
     """将对话流水存入数据库"""
     conn = get_connection()
     cursor = conn.cursor()
-    from datetime import datetime
     now = datetime.now().isoformat()
     cursor.execute("""
         INSERT INTO conversation_turns (user_id, session_id, role, content, turn_time)
@@ -117,8 +107,7 @@ def add_conversation_turn(user_id, session_id, role, content):
     conn.close()
 
 
-#用户画像
-
+# 用户画像
 def get_user_profile(user_id):
     """获取用户的画像（偏好、称呼等）"""
     conn = get_connection()
@@ -136,7 +125,6 @@ def update_user_profile(user_id, new_preference):
 
     conn = get_connection()
     cursor = conn.cursor()
-    from datetime import datetime
     now = datetime.now().isoformat()
     
     # 1. 先读取现有的偏好
@@ -166,13 +154,15 @@ def update_user_profile(user_id, new_preference):
     updated_preferences = json.dumps(pref_list, ensure_ascii=False)
     
     if row:
+        # 更新已存在的记录
         cursor.execute("""
             UPDATE user_profile SET preferences = ?, updated_at = ? WHERE user_id = ?
         """, (updated_preferences, now, user_id))
     else:
+        # 插入新记录（注意：这里的参数顺序必须是 user_id, preferences, updated_at）
         cursor.execute("""
             INSERT INTO user_profile (user_id, preferences, updated_at) VALUES (?, ?, ?)
-        """, (updated_preferences, now, user_id))
+        """, (user_id, updated_preferences, now)) # 👈 这里已经修正了参数顺序
         
     conn.commit()
     conn.close()
