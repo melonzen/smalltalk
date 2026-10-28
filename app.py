@@ -16,10 +16,20 @@ from database import (
 load_dotenv()
 init_db()
 
+# 尝试从云端 Secrets 读取，如果读不到（比如在本地跑），再用 .env 读取
+try:
+    api_key = st.secrets["DEEPSEEK_API_KEY"]
+except Exception:
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    api_key = os.environ.get("DEEPSEEK_API_KEY")
+
 client = OpenAI(
-    api_key=os.environ.get("DEEPSEEK_API_KEY"),
+    api_key=api_key,
     base_url="https://api.deepseek.com",
 )
+
 
 st.set_page_config(page_title="情感陪伴智能体", page_icon="🤖", layout="wide")
 
