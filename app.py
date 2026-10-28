@@ -70,7 +70,7 @@ with st.sidebar:
         st.session_state.show_db = not st.session_state.get("show_db", False)
 
 # ================= 主界面基础设置 =================
-st.title(f"🤖 情感陪伴智能体 ({group.split('：')[0]})")
+st.title(f"🤖 对话搭子 ({group.split('：')[0]})")
 
 if group.startswith("A组"):
     USER_ID = "test_user_A"
@@ -159,7 +159,7 @@ if st.session_state.get("show_db", False):
         st.warning("暂无数据")
 
     # 表 2
-    st.markdown("#### 2. 🧠 情感事件表 (`emotional_events`)")
+    st.markdown("#### 2.  情感事件表 (`emotional_events`)")
     df_events = pd.read_sql_query(f"SELECT * FROM emotional_events WHERE user_id = '{USER_ID}'", conn)
     if not df_events.empty:
         st.dataframe(df_events, use_container_width=True)
