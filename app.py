@@ -8,30 +8,43 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime
 
+# 【注意】st.set_page_config 必须是第一个被调用的 Streamlit 命令
+st.set_page_config(page_title="情感陪伴智能体", page_icon="🤖", layout="wide")
+
 from database import (
     init_db, add_emotional_event, retrieve_relevant_events,
     add_conversation_turn, get_user_profile, update_user_profile, get_connection
 )
 
+# 1. 加载本地环境变量
 load_dotenv()
-init_db()
 
-# 尝试从云端 Secrets 读取，如果读不到（比如在本地跑），再用 .env 读取
+# 2. 安全地读取 API Key（优先云端，其次本地）
+api_key = None
 try:
-    api_key = st.secrets["DEEPSEEK_API_KEY"]
+    # 尝试从云端 Secrets 读取
+    if "DEEPSEEK_API_KEY" in st.secrets:
+        api_key = st.secrets["DEEPSEEK_API_KEY"]
 except Exception:
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
+    pass
+
+if not api_key:
+    # 如果云端没有，尝试从本地 .env 读取
     api_key = os.environ.get("DEEPSEEK_API_KEY")
 
+# 3. 如果依然没有读到 Key，直接报错并停止运行（防止后续代码崩溃）
+if not api_key:
+    st.error("❌ 未找到 DEEPSEEK_API_KEY。请检查本地 .env 文件或在 Streamlit Cloud 的 Secrets 中配置是否正确（需注意双引号和空格）。")
+    st.stop()
+
+# 4. 初始化客户端
 client = OpenAI(
     api_key=api_key,
     base_url="https://api.deepseek.com",
 )
 
-
-st.set_page_config(page_title="情感陪伴智能体", page_icon="🤖", layout="wide")
+# 5. 初始化数据库
+init_db()
 
 # ================= 侧边栏：实验控制面板 =================
 with st.sidebar:
