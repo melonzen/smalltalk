@@ -98,18 +98,23 @@ def extract_memory(text):
     
     用户输入：{text}
     """
-    res = client.chat.completions.create(
-        model="deepseek-flash",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=0.1  # 👇 加上这个，让提取更严谨
-    )
-    content = res.choices[0].message.content
-        # 👇 强制在页面上显示模型到底返回了什么！
+    
+    try:
+        res = client.chat.completions.create(
+            model="deepseek-flash",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.1
+        )
+        content = res.choices[0].message.content
+        
+        # 强制在页面上显示模型到底返回了什么！
         st.info(f"模型原始返回: {content}") 
+        
         return json.loads(content)
+        
     except Exception as e:
-        # 👇 如果报错，直接把红字错误展示在网页上！
+        # 如果报错，直接把红字错误展示在网页上！
         st.error(f"提取记忆出错: {e}")
         return {"has_event": False, "user_preference": ""}
 
