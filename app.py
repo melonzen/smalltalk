@@ -85,7 +85,10 @@ if "messages" not in st.session_state:
 # ================= 核心函数定义 =================
 def extract_memory(text):
     prompt = f"""
-    分析用户输入，提取情感事件和用户偏好。
+    分析用户输入，提取情感事件和用户偏好。请严格遵循以下规则：
+    1. 只要用户表达了对某事物的【喜欢、讨厌、爱、偏好】，必须在 user_preference 中提取出来（例如：“喜欢霉霉的歌”）。如果有多个，用逗号分隔。
+    2. 如果用户描述了【已经发生的、带情绪的客观事件】，has_event 设为 true，并提取 event_summary。
+    3. 如果一句话里两者都有，同时提取。
     输出严格 JSON：
     {{
         "has_event": true/false,
