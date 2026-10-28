@@ -167,6 +167,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
+
 # 👇 状态控制区：如果开关是打开的，展示数据库 👇
 if st.session_state.get("show_db", False):
     st.subheader("🗄️ 当前云端数据库实时数据")
@@ -178,19 +179,20 @@ if st.session_state.get("show_db", False):
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("** 情感事件表 (emotional_events)**")
-        cursor.execute("SELECT event_summary, emotion_label, event_time FROM emotional_events WHERE user_id = ?", (USER_ID,))
+        cursor.execute("SELECT event_summary, emotion_label FROM emotional_events WHERE user_id = ?", (USER_ID,))
         events = cursor.fetchall()
         if events:
-            st.dataframe(pd.DataFrame(events, columns=["事件摘要", "情绪", "时间"]), use_container_width=True)
+            for e in events:
+                st.write(f"- {e[0]} (情绪: {e[1]})")
         else:
             st.info("暂无情感事件")
             
     with col2:
         st.markdown("**👤 用户画像表 (user_profile)**")
-        cursor.execute("SELECT preferences, updated_at FROM user_profile WHERE user_id = ?", (USER_ID,))
+        cursor.execute("SELECT preferences FROM user_profile WHERE user_id = ?", (USER_ID,))
         profile = cursor.fetchall()
         if profile:
-            st.dataframe(pd.DataFrame(profile, columns=["偏好设定", "更新时间"]), use_container_width=True)
+            st.write(profile)  # 直接打印原始数据，绝对能显示
         else:
             st.info("暂无用户画像")
     conn.close()
@@ -227,6 +229,7 @@ if not st.session_state.get("show_db", False):
                     add_emotional_event(USER_ID, memory_data["event_summary"], memory_data["emotion_label"], memory_data["intensity"])
                 if memory_data.get("user_preference"):
                     update_user_profile(USER_ID, memory_data["user_preference"])
+                    st.success(f"✅ 成功写入画像: {memory_data['user_preference']}")
 
             # 注意：这里我加了一个参数 USER_ID，防止函数内部找不到变量
             response_text = generate_response(prompt, use_memory, USER_ID)
